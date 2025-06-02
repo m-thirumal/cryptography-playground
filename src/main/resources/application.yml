@@ -1,0 +1,6 @@
+spring:
+    application:
+        name: ryptography-playground
+gg:
+  jte:
+    development-mode: true
