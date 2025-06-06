@@ -1,6 +1,7 @@
 package com.thirumal.service;
 
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.KeyFactory;
@@ -18,15 +19,24 @@ import java.security.spec.ECPoint;
 import java.security.spec.ECPublicKeySpec;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashMap;
+import java.util.List;
 
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.KeyAgreement;
+import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
+import com.thirumal.model.EncryptedMessage;
 import com.thirumal.model.JwkRequest;
 
 @Service
@@ -39,6 +49,8 @@ public class HybridCryptographyService {
     private PublicKey clientPublicKey;
     private static final Base64.Decoder urlDecoder = Base64.getUrlDecoder();
     private static final Base64.Encoder urlEncoder = Base64.getUrlEncoder().withoutPadding();
+
+    HashMap<String, SecretKey> sharedSecrets = new HashMap<>();
 
     public String initiateHandShake() {
         logger.info("Generating ECDH key pair");
@@ -115,14 +127,39 @@ public class HybridCryptographyService {
         return full;
     }
 
-    public JwkRequest receiveClientKey(JwkRequest jwkeRequest) throws Exception {
+    public JwkRequest receiveClientKey( String jsessionId, JwkRequest jwkeRequest) throws Exception {
         clientPublicKey = convertJwkToPublicKey(jwkeRequest);
 
         serverKeyPair = generateEcKeyPair();
         SecretKey sharedSecret = deriveAesKey(serverKeyPair.getPrivate(), clientPublicKey);
         logger.info("Shared secret derived successfully {}", sharedSecret);
         // You can store sharedSecret in session or memory
-
+        sharedSecrets.put(jsessionId, sharedSecret);
         return exportPublicKeyToJwk(serverKeyPair.getPublic());
+    }
+
+    public String decryptMessage(String jsessionId, EncryptedMessage encryptedMessage) {
+        byte[] iv = toByteArray(encryptedMessage.getIv());
+        byte[] cipherBytes = toByteArray(encryptedMessage.getCiphertext());
+        Cipher cipher;
+        byte[] decrypted = null;
+        try {
+            cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            GCMParameterSpec spec = new GCMParameterSpec(128, iv);
+            SecretKey sharedSecretKey = sharedSecrets.get(jsessionId);
+            cipher.init(Cipher.DECRYPT_MODE, sharedSecretKey, spec);
+            decrypted = cipher.doFinal(cipherBytes);
+        } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException | InvalidAlgorithmParameterException | IllegalBlockSizeException | BadPaddingException e) {
+            e.printStackTrace();
+        }
+        return new String(decrypted, StandardCharsets.UTF_8);
+    }
+
+    private byte[] toByteArray(List<Integer> list) {
+        byte[] arr = new byte[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            arr[i] = list.get(i).byteValue();
+        }
+        return arr;
     }
 }

@@ -64,6 +64,21 @@
             );
 
             log("Encrypted test message: " + btoa(String.fromCharCode(...new Uint8Array(ciphertext))));
+            // 6. Send ciphertext to server
+            const payload = {
+                ciphertext: Array.from(new Uint8Array(ciphertext)),
+                iv: Array.from(iv)
+            };
+
+            const encResponse = await fetch("/hybrid-cryptography/decrypt-message", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            const plainText = await encResponse.text();
+            log("Server decrypted message: " + plainText);
+
         });
     </script>
 </body>
