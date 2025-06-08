@@ -33,6 +33,7 @@ public class HybridCryptographyController {
     @PostMapping("/client-public")
     public JwkRequest receiveClientKey(@RequestBody JwkRequest jwkeRequest, @RequestHeader("Cookie") String cookieHeader) throws Exception {
         String jsessionId = extractJsessionId(cookieHeader);
+        System.out.println("JS = " + jsessionId);
         if (jsessionId == null) {
             throw new IllegalArgumentException("JSESSIONID cookie not found");
         }
@@ -42,6 +43,7 @@ public class HybridCryptographyController {
     @PostMapping("/decrypt-message")
     public ResponseEntity<String> decryptMessage(@RequestBody EncryptedMessage encryptedMessage, @RequestHeader("Cookie") String cookieHeader) throws Exception {
         String jsessionId = extractJsessionId(cookieHeader);
+        System.out.println("JS = " + jsessionId);
         if (jsessionId == null) {
             throw new IllegalArgumentException("JSESSIONID cookie not found");
         }

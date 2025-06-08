@@ -20,19 +20,22 @@
                 true,
                 ["deriveKey", "deriveBits"]
             );
-            log("Bowser Key Pair publicKey: " + browserKeyPair.publicKey);
 
-            const clientJwk = await crypto.subtle.exportKey("jwk", browserKeyPair.publicKey);
-            clientJwk.key_ops = ["deriveKey", "deriveBits"];
+            const privateJwk = await crypto.subtle.exportKey("jwk", browserKeyPair.privateKey);
+            log("Private Key (JWK): " + JSON.stringify(privateJwk, null, 2));
+
+            const publicJwk = await crypto.subtle.exportKey("jwk", browserKeyPair.publicKey);
+            log("Public Key (JWK): " + JSON.stringify(publicJwk, null, 2));
+
             // 2. Send public key to server
             const response = await fetch("/hybrid-cryptography/client-public", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(clientJwk)
+                body: JSON.stringify(publicJwk)
             });
 
             const serverJwk = await response.json();
-            log("Received server public key: " + serverJwk);
+            log("Received server public key: " + JSON.stringify(serverJwk, null, 2));
 
             // 3. Import server's public key
             const serverPublicKey = await crypto.subtle.importKey(
@@ -43,33 +46,49 @@
                 []
             );
 
-            // 4. Derive AES key (256-bit) from shared secret
-            const aesKey = await crypto.subtle.deriveKey(
+            // 4. Derive AES key (256-bit) using SHA-256 hash of ECDH shared secret
+            const sharedSecretBits = await crypto.subtle.deriveBits(
                 { name: "ECDH", public: serverPublicKey },
                 browserKeyPair.privateKey,
+                256
+            );
+
+            const hashedSecret = await crypto.subtle.digest("SHA-256", sharedSecretBits);
+
+            const aesKey = await crypto.subtle.importKey(
+                "raw",
+                hashedSecret,
                 { name: "AES-GCM", length: 256 },
-                false,
+                true,
                 ["encrypt", "decrypt"]
             );
 
-            log("Derived AES-256 key shared with server");
+            log("Derived AES-256 key (from shared secret + SHA-256)");
 
-            // 5. Test encryption
+            // ✅ Log Base64 of raw AES key
+            const rawKey = await crypto.subtle.exportKey("raw", aesKey);
+            const base64Key = btoa(String.fromCharCode(...new Uint8Array(rawKey)));
+            log("Derived AES Key (Base64): " + base64Key);
+
+            // 5. Encrypt a test message
             const enc = new TextEncoder();
-            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV for AES-GCM
+
             const ciphertext = await crypto.subtle.encrypt(
                 { name: "AES-GCM", iv },
                 aesKey,
                 enc.encode("Hello from browser!")
             );
 
-            log("Encrypted test message: " + btoa(String.fromCharCode(...new Uint8Array(ciphertext))));
-            // 6. Send ciphertext to server
             const payload = {
                 ciphertext: Array.from(new Uint8Array(ciphertext)),
                 iv: Array.from(iv)
             };
 
+            log("IV (Base64): " + btoa(String.fromCharCode(...iv)));
+            log("Ciphertext (Base64): " + btoa(String.fromCharCode(...new Uint8Array(ciphertext))));
+
+            // 6. Send ciphertext to server for decryption
             const encResponse = await fetch("/hybrid-cryptography/decrypt-message", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -78,7 +97,6 @@
 
             const plainText = await encResponse.text();
             log("Server decrypted message: " + plainText);
-
         });
     </script>
 </body>

@@ -33,11 +33,11 @@ import javax.crypto.spec.SecretKeySpec;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import com.thirumal.model.EncryptedMessage;
 import com.thirumal.model.JwkRequest;
+import com.thirumal.model.SessionKeyContext;
 
 @Service
 public class HybridCryptographyService {
@@ -50,7 +50,7 @@ public class HybridCryptographyService {
     private static final Base64.Decoder urlDecoder = Base64.getUrlDecoder();
     private static final Base64.Encoder urlEncoder = Base64.getUrlEncoder().withoutPadding();
 
-    HashMap<String, SecretKey> sharedSecrets = new HashMap<>();
+    private final HashMap<String, SessionKeyContext> sessionKeys = new HashMap<>();
 
     public String initiateHandShake() {
         logger.info("Generating ECDH key pair");
@@ -127,14 +127,14 @@ public class HybridCryptographyService {
         return full;
     }
 
-    public JwkRequest receiveClientKey( String jsessionId, JwkRequest jwkeRequest) throws Exception {
+    public JwkRequest receiveClientKey(String jsessionId, JwkRequest jwkeRequest) throws Exception {
         clientPublicKey = convertJwkToPublicKey(jwkeRequest);
 
         serverKeyPair = generateEcKeyPair();
         SecretKey sharedSecret = deriveAesKey(serverKeyPair.getPrivate(), clientPublicKey);
-        logger.info("Shared secret derived successfully {}", sharedSecret);
+        logger.info("Shared secret derived successfully {}", Base64.getEncoder().encodeToString(sharedSecret.getEncoded()));
         // You can store sharedSecret in session or memory
-        sharedSecrets.put(jsessionId, sharedSecret);
+        sessionKeys.put(jsessionId, new SessionKeyContext(clientPublicKey, serverKeyPair, sharedSecret));
         return exportPublicKeyToJwk(serverKeyPair.getPublic());
     }
 
@@ -146,8 +146,16 @@ public class HybridCryptographyService {
         try {
             cipher = Cipher.getInstance("AES/GCM/NoPadding");
             GCMParameterSpec spec = new GCMParameterSpec(128, iv);
-            SecretKey sharedSecretKey = sharedSecrets.get(jsessionId);
-            cipher.init(Cipher.DECRYPT_MODE, sharedSecretKey, spec);
+            SessionKeyContext secretKey = sessionKeys.get(jsessionId);
+            if (secretKey == null) {
+                logger.error("No SessionKeyContext found for sessionId: {}", jsessionId);
+                throw new IllegalStateException("SessionKeyContext is null for sessionId: " + jsessionId);
+            } else if (secretKey.getSharedSecret() == null) {
+                logger.error("SharedSecret is null for sessionId: {}", jsessionId);
+                throw new IllegalStateException("SharedSecret is null for sessionId: " + jsessionId);
+            }
+            logger.info("Derived AES key (Base64) in server: {}", Base64.getEncoder().encodeToString(secretKey.getSharedSecret().getEncoded()));
+            cipher.init(Cipher.DECRYPT_MODE, secretKey.getSharedSecret(), spec);
             decrypted = cipher.doFinal(cipherBytes);
         } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException | InvalidAlgorithmParameterException | IllegalBlockSizeException | BadPaddingException e) {
             e.printStackTrace();
@@ -155,11 +163,12 @@ public class HybridCryptographyService {
         return new String(decrypted, StandardCharsets.UTF_8);
     }
 
-    private byte[] toByteArray(List<Integer> list) {
-        byte[] arr = new byte[list.size()];
+    public byte[] toByteArray(List<Integer> list) {
+        byte[] bytes = new byte[list.size()];
         for (int i = 0; i < list.size(); i++) {
-            arr[i] = list.get(i).byteValue();
+            bytes[i] = (byte) (int) list.get(i);
         }
-        return arr;
+        return bytes;
     }
+
 }
