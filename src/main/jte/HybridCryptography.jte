@@ -73,11 +73,12 @@
             // 5. Encrypt a test message
             const enc = new TextEncoder();
             const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV for AES-GCM
-
+            const textMessage = "Hello from browser!";
+		    log("Text message: " + textMessage);
             const ciphertext = await crypto.subtle.encrypt(
                 { name: "AES-GCM", iv },
                 aesKey,
-                enc.encode("Hello from browser!")
+                enc.encode(textMessage)
             );
 
             const payload = {
@@ -86,7 +87,7 @@
             };
 
             log("IV (Base64): " + btoa(String.fromCharCode(...iv)));
-            log("Ciphertext (Base64): " + btoa(String.fromCharCode(...new Uint8Array(ciphertext))));
+            log("Browser Ciphertext (Base64): " + btoa(String.fromCharCode(...new Uint8Array(ciphertext))));
 
             // 6. Send ciphertext to server for decryption
             const encResponse = await fetch("/hybrid-cryptography/decrypt-message", {
