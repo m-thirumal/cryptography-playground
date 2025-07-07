@@ -29,6 +29,7 @@ import javax.crypto.KeyAgreement;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 import org.slf4j.Logger;
@@ -144,9 +145,7 @@ public class HybridCryptographyService {
         Cipher cipher;
         byte[] decrypted = null;
         try {
-            cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            GCMParameterSpec spec = new GCMParameterSpec(128, iv);
-            SessionKeyContext secretKey = sessionKeys.get(jsessionId);
+        	SessionKeyContext secretKey = sessionKeys.get(jsessionId);
             if (secretKey == null) {
                 logger.error("No SessionKeyContext found for sessionId: {}", jsessionId);
                 throw new IllegalStateException("SessionKeyContext is null for sessionId: " + jsessionId);
@@ -154,6 +153,8 @@ public class HybridCryptographyService {
                 logger.error("SharedSecret is null for sessionId: {}", jsessionId);
                 throw new IllegalStateException("SharedSecret is null for sessionId: " + jsessionId);
             }
+            cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            GCMParameterSpec spec = new GCMParameterSpec(128, iv);            
             logger.info("Derived AES key (Base64) in server: {}", Base64.getEncoder().encodeToString(secretKey.getSharedSecret().getEncoded()));
             cipher.init(Cipher.DECRYPT_MODE, secretKey.getSharedSecret(), spec);
             decrypted = cipher.doFinal(cipherBytes);
@@ -161,6 +162,52 @@ public class HybridCryptographyService {
             e.printStackTrace();
         }
         return new String(decrypted, StandardCharsets.UTF_8);
+    }
+    
+	/**
+	 * Encrypts the given plain text using AES encryption in CBC mode with PKCS5 padding.
+	 *
+	 * @param plainText The text to encrypt.
+	 * @param key The encryption key (must be 16 characters long).
+	 * @param iv The initialization vector (must be 16 characters long).
+	 * @return The Base64-encoded encrypted text.
+	 * @throws Exception If an error occurs during encryption.
+	 */
+    public static String encrypt(String plainText, String key, String iv) throws Exception {
+        if (key.length() != 16 || iv.length() != 16) {
+            throw new IllegalArgumentException("Key and IV must be 16 characters (128 bits) long");
+        }
+
+        byte[] keyBytes = key.getBytes(StandardCharsets.UTF_8);
+        byte[] ivBytes = iv.getBytes(StandardCharsets.UTF_8);
+
+        Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding"); // CryptoJS uses PKCS7 but Java PKCS5 is compatible
+        SecretKeySpec secretKey = new SecretKeySpec(keyBytes, "AES");
+        IvParameterSpec ivSpec = new IvParameterSpec(ivBytes);
+
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey, ivSpec);
+        byte[] encrypted = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
+
+        return Base64.getEncoder().encodeToString(encrypted);
+    }
+    
+    public static String decrypt(String base64CipherText, String key, String iv) throws Exception {
+        if (key.length() != 16 || iv.length() != 16) {
+            throw new IllegalArgumentException("Key and IV must be 16 characters long (128 bits)");
+        }
+
+        byte[] cipherBytes = Base64.getDecoder().decode(base64CipherText);
+        byte[] keyBytes = key.getBytes(StandardCharsets.UTF_8);
+        byte[] ivBytes = iv.getBytes(StandardCharsets.UTF_8);
+
+        SecretKeySpec secretKey = new SecretKeySpec(keyBytes, "AES");
+        IvParameterSpec ivSpec = new IvParameterSpec(ivBytes);
+
+        Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+        cipher.init(Cipher.DECRYPT_MODE, secretKey, ivSpec);
+
+        byte[] decryptedBytes = cipher.doFinal(cipherBytes);
+        return new String(decryptedBytes, StandardCharsets.UTF_8);
     }
 
     public byte[] toByteArray(List<Integer> list) {
